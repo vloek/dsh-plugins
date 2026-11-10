@@ -1,0 +1,17 @@
+# dsh-task-board: one host row — task store, the `task_board` tool, a prompt
+# section, a runtime skill, and two exact Fetch routes the browser half uses
+# (/api/dsh-task-board/rpc and /api/dsh-task-board/media).
+# The browser half (sidebar panel "Задачи") ships via package.json `dsh.client`.
+- insert:
+    - id: task-board
+      name: 'dsh-task-board'
+      inject: [tools]
+      config:
+        # Absolute folder with the tasks. null = $DSH_HOME/task-board (~/.dsh/task-board).
+        root: null
+        # What "Выполнено" does with an approved task: archive (move to _archive/) or delete.
+        onDone: archive
+        # Tell the model the board exists (short system-prompt section).
+        promptSection: true
+        # Register the `task-board-format` skill with the on-disk format.
+        skill: true

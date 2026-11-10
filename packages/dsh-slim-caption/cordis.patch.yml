@@ -1,0 +1,16 @@
+# dsh-slim-caption: one loader row. The host half does nothing; the browser half
+# (package.json `dsh.client`) reshapes the Windows desktop caption.
+- insert:
+    - id: slim-caption
+      name: 'dsh-slim-caption'
+      config:
+        # Hide the "Application / Edit" menubar.
+        hideMenu: true
+        # Lift the conversation title row into the caption row.
+        mergeHeader: true
+        # Transparent background behind the native min / max / close buttons.
+        transparentControls: true
+        # F11 toggles fullscreen for the whole window.
+        f11Fullscreen: true
+        # Esc stays with the app in fullscreen (F11 is the way out).
+        escKeepsFullscreen: true

@@ -1,0 +1,6 @@
+# dsh-quick-switch: one loader row. The host half does nothing; the browser half
+# (package.json `dsh.client`) registers the `session.quickSwitch` command
+# (Desktop: Ctrl+Space, Web: Ctrl+Shift+Space) and its palette overlay.
+- insert:
+    - id: quick-switch
+      name: 'dsh-quick-switch'

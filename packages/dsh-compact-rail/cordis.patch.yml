@@ -1,0 +1,12 @@
+# dsh-compact-rail: one loader row. The host half does nothing; the browser half
+# (package.json `dsh.client`) restores the 56px icon rail of the collapsed left
+# sidebar in the Windows desktop shell.
+- insert:
+    - id: compact-rail
+      name: 'dsh-compact-rail'
+      config:
+        # Collapse the sidebar to the rail once when the app starts
+        # (DSH forgets the sidebar state on every reload).
+        startCollapsed: true
+        # Expanded sidebar: hide the "DeepSeek Harness / local build" brand row.
+        hideBrand: false

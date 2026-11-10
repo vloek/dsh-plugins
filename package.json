@@ -1,0 +1,12 @@
+{
+  "name": "dsh-plugins",
+  "private": true,
+  "description": "Плагины для DeepSeek Harness: доска приёмки задач, быстрое переключение сессий, узкая боковая панель, компактный заголовок и полноэкранный режим.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "test": "node scripts/test.mjs",
+    "build": "node scripts/build-dist.mjs",
+    "install-plugins": "node scripts/install.mjs"
+  }
+}
