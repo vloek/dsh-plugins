@@ -1,9 +1,11 @@
-// node test/run.mjs — store, routes and text, without a harness.
+// node test/run.mjs — store, routes, text and the pure parts of the panel, without a harness.
 import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import vm from "node:vm";
 import { TaskStore, isValidId, slugify, normalizeTask } from "../lib/store.js";
 import { createMediaHandler, createRpcHandler } from "../lib/routes.js";
 import { formatDoc, renderList, renderTask, toolDescription } from "../lib/text.js";
@@ -502,4 +504,34 @@ test("no watcher: outside writes are still noticed by the rescan", async () => {
 		store.close();
 		await rm(base, { recursive: true, force: true });
 	}
+});
+
+/** Loads lib/client.js the way the app's module loader does and returns its test exports. */
+async function clientInternals() {
+	const source = await readFile(fileURLToPath(new URL("../lib/client.js", import.meta.url)), "utf8");
+	const react = { createElement: () => null, Fragment: "Fragment", useState: (init) => [init, () => {}], useEffect: () => {}, useCallback: (fn) => fn, useRef: (value) => ({ current: value }), useMemo: (fn) => fn() };
+	let exports;
+	const window = { __ModuleLoader__: { load: (def) => { exports = def.factory(() => react); } } };
+	vm.runInNewContext(source, { window, document: {}, navigator: {}, URL, console, setTimeout, clearTimeout });
+	return exports.__internals;
+}
+
+test("panel: list filters by status", async () => {
+	const { BOARD_TABS, boardTab, groupTasks } = await clientInternals();
+	// Array.from: values made inside the vm context have another realm's prototypes.
+	assert.deepEqual(Array.from(BOARD_TABS, (tab) => tab.label), ["В работе", "На доработке", "На проверке"]);
+	assert.equal(boardTab({ status: "in_progress" }), "working");
+	assert.equal(boardTab({ status: "changes_requested" }), "changes");
+	assert.equal(boardTab({ status: "review" }), "review");
+	assert.equal(boardTab({ status: "approved" }), "review", "an accepted task waits under «На проверке» until it is closed");
+	assert.equal(boardTab({ status: "something-new" }), "review", "an unknown status is never hidden");
+	const groups = groupTasks([
+		{ id: "a", status: "review" },
+		{ id: "b", status: "in_progress" },
+		{ id: "c", status: "approved" },
+		{ id: "d", status: "changes_requested" },
+		{ id: "e", status: "in_progress" },
+	]);
+	assert.deepEqual(Object.fromEntries(Object.entries(groups).map(([key, tasks]) => [key, Array.from(tasks, (task) => task.id)])), { working: ["b", "e"], changes: ["d"], review: ["a", "c"] });
+	assert.equal(Array.from(BOARD_TABS).every((tab) => Array.isArray(groups[tab.id])), true);
 });

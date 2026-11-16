@@ -275,6 +275,26 @@ window.__ModuleLoader__.load({
 			return out;
 		}
 
+		// List filters of the board, in the order a task travels. "Архив" is a separate tab after them.
+		var BOARD_TABS = [
+			{ id: "working", label: "В работе" },
+			{ id: "changes", label: "На доработке" },
+			{ id: "review", label: "На проверке" },
+		];
+
+		/** Filter a board task belongs to. An accepted task stays under "На проверке" until it is closed. */
+		function boardTab(task) {
+			if (task.status === "in_progress") return "working";
+			if (task.status === "changes_requested") return "changes";
+			return "review";
+		}
+
+		function groupTasks(tasks) {
+			var out = { working: [], changes: [], review: [] };
+			tasks.forEach(function (task) { out[boardTab(task)].push(task); });
+			return out;
+		}
+
 		function byLabel(by) {
 			if (!by || by === "reviewer") return "Ты";
 			return by;
@@ -1138,7 +1158,7 @@ window.__ModuleLoader__.load({
 		// ---------- panel ----------
 
 		function MainPanel() {
-			var _tab = useState("board");
+			var _tab = useState("review");
 			var tab = _tab[0];
 			var setTab = _tab[1];
 			var _active = useState(null);
@@ -1224,17 +1244,29 @@ window.__ModuleLoader__.load({
 			var archivedTasks = useMemo(function () {
 				return (archive ? archive.tasks : []).slice().sort(function (a, b) { return (Date.parse(b.updatedAt || "") || 0) - (Date.parse(a.updatedAt || "") || 0); });
 			}, [archive]);
-			var visible = tab === "board" ? boardTasks : archivedTasks;
+			var groups = useMemo(function () { return groupTasks(boardTasks); }, [boardTasks]);
+			var isArchive = tab === "archive";
+			var visible = isArchive ? archivedTasks : groups[tab] || [];
 			var root = active ? active.root : "";
 			// Paths and separator exactly as the host's OS reports them (the panel may run in a browser elsewhere).
 			var env = active ? { sep: active.sep, paths: active.paths } : null;
 			var onDone = active ? active.onDone : "archive";
 			var archivedCount = archive ? archivedTasks.length : active && typeof active.archivedCount === "number" ? active.archivedCount : 0;
 			var count = counters(boardTasks);
-			var loaded = tab === "board" ? active !== null : archive !== null;
+			var loaded = isArchive ? archive !== null : active !== null;
+
+			// Open on what waits for the reviewer; if nothing does, on the first filter that has tasks.
+			var pickedTab = useRef(false);
+			useEffect(function () {
+				if (pickedTab.current || active === null) return;
+				pickedTab.current = true;
+				if (tabRef.current !== "review" || groups.review.length > 0) return;
+				if (groups.changes.length > 0) setTab("changes");
+				else if (groups.working.length > 0) setTab("working");
+			}, [active, groups]);
 
 			// Keep a valid selection: the same task if it is still listed, else its neighbour, else the first row.
-			var selectedId = selected && selected.archived === (tab === "archive") ? selected.id : null;
+			var selectedId = selected && selected.archived === isArchive ? selected.id : null;
 			var selectedIndex = visible.findIndex(function (task) { return task.id === selectedId; });
 			useEffect(function () {
 				if (!loaded) return;
@@ -1247,18 +1279,21 @@ window.__ModuleLoader__.load({
 					return;
 				}
 				var task = visible[Math.min(lastIndex.current, visible.length - 1)];
-				setSelected({ id: task.id, archived: tab === "archive" });
+				setSelected({ id: task.id, archived: isArchive });
 			}, [loaded, selectedIndex, visible, tab]);
 
 			function select(task) {
 				setGuide(false);
-				setSelected({ id: task.id, archived: Boolean(task.archived) || tab === "archive" });
+				setSelected({ id: task.id, archived: Boolean(task.archived) || isArchive });
 			}
 			function switchTab(next) {
 				if (next === tab) return;
 				lastIndex.current = 0;
 				setTab(next);
 			}
+
+			var tabMeta = BOARD_TABS.find(function (item) { return item.id === tab; });
+			var tabLabel = tabMeta ? tabMeta.label : "Архив";
 
 			var countParts = [];
 			if (count.review > 0) countParts.push("ждут проверки " + count.review);
@@ -1271,16 +1306,17 @@ window.__ModuleLoader__.load({
 			else if (guide) detail = h(AgentGuide, { root: root, env: env, onToast: showToast, onClose: function () { setGuide(false); } });
 			else if (selectedIndex !== -1)
 				detail = h(TaskDetail, {
-					key: (tab === "archive" ? "a:" : "t:") + selectedId,
-					target: { id: selectedId, archived: tab === "archive" },
+					key: (isArchive ? "a:" : "t:") + selectedId,
+					target: { id: selectedId, archived: isArchive },
 					version: version,
 					onDone: onDone,
 					onGone: function (message, ok) { load(); showToast(message, !ok); },
 					onToast: showToast,
 					onChanged: load,
 				});
-			else if (tab === "board") detail = h(AgentGuide, { root: root, env: env, onToast: showToast, empty: true });
-			else detail = h("div", { className: "tb-empty" }, h("p", null, "Архив пуст. Сюда попадают задачи после «Выполнено»."));
+			else if (isArchive) detail = h("div", { className: "tb-empty" }, h("p", null, "Архив пуст. Сюда попадают задачи после «Выполнено»."));
+			else if (boardTasks.length === 0) detail = h(AgentGuide, { root: root, env: env, onToast: showToast, empty: true });
+			else detail = h("div", { className: "tb-empty" }, h("p", null, "В разделе «" + tabLabel + "» сейчас пусто. Задачи есть в других разделах."));
 
 			return h(
 				"div",
@@ -1308,11 +1344,23 @@ window.__ModuleLoader__.load({
 							h(
 								"div",
 								{ className: "tb-tabs", role: "tablist" },
-								h("button", { type: "button", role: "tab", "aria-selected": tab === "board", className: "tb-tab", onClick: function () { switchTab("board"); } }, "На доске · " + boardTasks.length),
-								h("button", { type: "button", role: "tab", "aria-selected": tab === "archive", className: "tb-tab", onClick: function () { switchTab("archive"); } }, "Архив · " + archivedCount),
+								BOARD_TABS.map(function (item) {
+									return h(
+										"button",
+										{ key: item.id, type: "button", role: "tab", "aria-selected": tab === item.id, className: "tb-tab", onClick: function () { switchTab(item.id); } },
+										item.label,
+										h("span", { className: "tb-tab-count" }, groups[item.id].length),
+									);
+								}),
+								h(
+									"button",
+									{ key: "archive", type: "button", role: "tab", "aria-selected": isArchive, className: "tb-tab", onClick: function () { switchTab("archive"); } },
+									"Архив",
+									h("span", { className: "tb-tab-count" }, archivedCount),
+								),
 							),
 							loaded
-								? h(TaskList, { tasks: visible, selectedId: selectedId, onSelect: select, emptyText: tab === "board" ? "На доске пусто" : "Архив пуст" })
+								? h(TaskList, { tasks: visible, selectedId: selectedId, onSelect: select, emptyText: isArchive ? "Архив пуст" : boardTasks.length === 0 ? "На доске пусто" : "Здесь пусто" })
 								: h("div", { className: "tb-list-empty" }, "Загрузка…"),
 						),
 						h("main", { className: "tb-detailpane" }, detail),
@@ -1360,10 +1408,11 @@ window.__ModuleLoader__.load({
 			".tb-guide-prompt{margin:0 0 10px;padding:12px 14px;border-radius:8px;background:var(--tb-code-block-bg);border:1px solid var(--tb-line);font:12.5px/1.6 var(--tb-mono);white-space:pre-wrap;word-break:break-word;max-height:340px;overflow:auto;user-select:text}",
 			".tb-head-error{margin:10px 0 0}",
 			// split: fills the remaining height when there is one, otherwise sizes to its content
-			".tb-split{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(260px,380px) minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:20px;padding:16px 0}",
+			".tb-split{flex:1 1 auto;min-height:0;display:grid;grid-template-columns:minmax(260px,400px) minmax(0,1fr);grid-template-rows:minmax(0,1fr);gap:20px;padding:16px 0}",
 			".tb-listpane{min-height:0;display:flex;flex-direction:column;gap:8px}",
-			".tb-tabs{display:flex;gap:2px;background:var(--tb-l1);border-radius:8px;padding:2px;flex:none;align-self:flex-start}",
-			".tb-tab{border:0;background:transparent;color:var(--tb-fg2);font:inherit;font-size:13px;padding:3px 12px;border-radius:6px;cursor:pointer}",
+			".tb-tabs{display:flex;flex-wrap:wrap;gap:2px;background:var(--tb-l1);border-radius:8px;padding:2px;flex:none}",
+			".tb-tab{flex:1 1 auto;display:inline-flex;align-items:center;justify-content:center;gap:4px;border:0;background:transparent;color:var(--tb-fg2);font:inherit;font-size:13px;white-space:nowrap;padding:3px 7px;border-radius:6px;cursor:pointer}",
+			".tb-tab-count{color:var(--tb-fg3);font-size:12px;font-variant-numeric:tabular-nums}",
 			".tb-tab[aria-selected=true]{background:var(--tb-bg);color:var(--tb-fg);box-shadow:0 1px 2px rgba(0,0,0,.12)}",
 			".tb-list{flex:1;min-height:0;overflow-y:auto;padding:0 4px 16px 0;display:flex;flex-direction:column}",
 			".tb-list-empty{color:var(--tb-fg3);padding:24px 8px;text-align:center}",
@@ -1497,6 +1546,8 @@ window.__ModuleLoader__.load({
 			".tb-on-dark:hover{background:rgba(255,255,255,.15);color:#fff}",
 			// narrow panel: list above the card
 			"@container (max-width:760px){.tb-split{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(120px,38%) minmax(0,1fr);gap:12px}.tb-page{padding:12px 14px 0}.tb-detail-body{padding:18px 16px 8px}.tb-actions{padding:10px 16px 12px}.tb-counters{white-space:normal}.tb-row-thumb{width:56px;height:40px}}",
+			// very narrow panel: the four list tabs become a 2×2 grid instead of wrapping 3+1
+			"@container (max-width:400px){.tb-tabs{display:grid;grid-template-columns:1fr 1fr}}",
 		].join("\n");
 
 		module.exports.inject = ["slots"];
@@ -1525,6 +1576,9 @@ window.__ModuleLoader__.load({
 			isNewSince: isNewSince,
 			sortTasks: sortTasks,
 			counters: counters,
+			BOARD_TABS: BOARD_TABS,
+			boardTab: boardTab,
+			groupTasks: groupTasks,
 			safeUrl: safeUrl,
 			plural: plural,
 			relTime: relTime,

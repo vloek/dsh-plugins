@@ -70,7 +70,7 @@ node scripts/install.mjs --uninstall
 2. В `package.json` профиля добавь строку в `dependencies`:
 
    ```json
-   "dsh-task-board": "file:local-plugins/dsh-task-board-0.3.2.tgz"
+   "dsh-task-board": "file:local-plugins/dsh-task-board-0.4.0.tgz"
    ```
 
    и имя плагина в массив `dsh.profile.bundles`.

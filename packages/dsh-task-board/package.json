@@ -1,6 +1,6 @@
 {
   "name": "dsh-task-board",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "Review board for DeepSeek Harness: tasks as folders (task.json + screenshots/videos), approve or send back for rework from a sidebar panel; agents act on the verdict through the task_board tool.",
   "type": "module",
   "license": "MIT",
