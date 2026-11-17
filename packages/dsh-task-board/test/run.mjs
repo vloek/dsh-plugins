@@ -535,3 +535,42 @@ test("panel: list filters by status", async () => {
 	assert.deepEqual(Object.fromEntries(Object.entries(groups).map(([key, tasks]) => [key, Array.from(tasks, (task) => task.id)])), { working: ["b", "e"], changes: ["d"], review: ["a", "c"] });
 	assert.equal(Array.from(BOARD_TABS).every((tab) => Array.isArray(groups[tab.id])), true);
 });
+
+test("panel: task age and last change date", async () => {
+	const { ageDays, ageText, dayStamp } = await clientInternals();
+	// Local-time dates, so the test does not depend on the machine's time zone.
+	const at = (y, m, d, h = 12, min = 0) => new Date(y, m - 1, d, h, min);
+	const now = at(2026, 11, 17, 16).getTime();
+	assert.equal(ageDays(at(2026, 11, 17, 0, 5).toISOString(), now), 0);
+	assert.equal(ageDays(at(2026, 11, 16, 23, 59).toISOString(), now), 1, "yesterday evening is one day, not zero");
+	assert.equal(ageDays(at(2026, 11, 5).toISOString(), now), 12);
+	assert.equal(ageDays(at(2026, 11, 18).toISOString(), now), 0, "a clock that runs ahead never gives a negative age");
+	assert.equal(ageDays("", now), -1);
+	assert.equal(ageDays("not a date", now), -1);
+	assert.equal(ageText(at(2026, 11, 17, 9).toISOString(), now), "создана сегодня");
+	assert.equal(ageText(at(2026, 11, 16).toISOString(), now), "1 день");
+	assert.equal(ageText(at(2026, 11, 14).toISOString(), now), "3 дня");
+	assert.equal(ageText(at(2026, 11, 5).toISOString(), now), "12 дней");
+	assert.equal(ageText(at(2026, 10, 27).toISOString(), now), "21 день");
+	assert.equal(ageText(undefined, now), "");
+	assert.equal(dayStamp(at(2026, 11, 17, 15, 2).toISOString(), now), "сегодня, 15:02");
+	assert.equal(dayStamp(at(2026, 11, 16, 9, 10).toISOString(), now), "вчера, 09:10");
+	assert.match(dayStamp(at(2026, 11, 5).toISOString(), now), /^5 нояб.?$/);
+	assert.match(dayStamp(at(2025, 12, 3).toISOString(), now), /^3 дек.? 2025/);
+	assert.equal(dayStamp("", now), "");
+});
+
+test("panel: list row heading is «[KEY] title»", async () => {
+	const { rowHeading } = await clientInternals();
+	const heading = (id, title) => { const out = rowHeading({ id, title }); return out.key ? "[" + out.key + "] " + out.title : out.title; };
+	assert.equal(heading("app-240-template-editor", "Редактор шаблонов"), "[APP-240] Редактор шаблонов");
+	assert.equal(heading("web-1168-help-page", "WEB-1168: Телефон поддержки на странице помощи"), "[WEB-1168] Телефон поддержки на странице помощи");
+	assert.equal(heading("app2-177-list-filter", "APP2-177: APP2-177 · Общий фильтр списка"), "[APP2-177] Общий фильтр списка", "a key repeated in the title is cut out every time");
+	assert.equal(heading("app2-193-mailings", "[app2-193] UI-04.FE · Рассылки"), "[APP2-193] UI-04.FE · Рассылки", "another key stays in the title");
+	assert.equal(heading("frontend-data-layer", "APP2-163 · Слой данных"), "[APP2-163] Слой данных", "the key can come from the title alone");
+	assert.equal(heading("docs", "[ABC-7] Заметки"), "[ABC-7] Заметки");
+	assert.equal(heading("demo-task-board", "Демо: проверь саму доску задач"), "Демо: проверь саму доску задач");
+	assert.equal(heading("encoding", "UTF-8 support"), "UTF-8 support", "no separator and no id match: a plain title");
+	assert.equal(heading("app-12", "APP-12"), "[APP-12] ", "a title that is only the key leaves the key");
+	assert.equal(heading("broken", ""), "broken", "nothing to show: fall back to the id");
+});

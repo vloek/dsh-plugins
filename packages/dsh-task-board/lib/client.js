@@ -74,6 +74,35 @@ window.__ModuleLoader__.load({
 			return new Date(t).toLocaleDateString("ru-RU", { day: "numeric", month: "short", year: "numeric" });
 		}
 
+		/** Calendar days from an ISO time to now, in local time: 0 is today. -1 when the time is unreadable. */
+		function ageDays(iso, nowMs) {
+			var t = Date.parse(iso || "");
+			if (!Number.isFinite(t)) return -1;
+			var then = new Date(t);
+			var now = new Date(nowMs || Date.now());
+			var from = Date.UTC(then.getFullYear(), then.getMonth(), then.getDate());
+			var to = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+			return Math.max(0, Math.round((to - from) / 86400000));
+		}
+
+		/** How old a task is: "создана сегодня", "1 день", "12 дней". */
+		function ageText(iso, nowMs) {
+			var days = ageDays(iso, nowMs);
+			if (days < 0) return "";
+			if (days === 0) return "создана сегодня";
+			return days + " " + plural(days, ["день", "дня", "дней"]);
+		}
+
+		/** A date for a list row: "сегодня, 15:02", "вчера, 09:10", "16 нояб.", "3 дек. 2025 г.". */
+		function dayStamp(iso, nowMs) {
+			var days = ageDays(iso, nowMs);
+			if (days < 0) return "";
+			var date = new Date(Date.parse(iso));
+			if (days <= 1) return (days === 0 ? "сегодня, " : "вчера, ") + date.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+			var sameYear = date.getFullYear() === new Date(nowMs || Date.now()).getFullYear();
+			return date.toLocaleDateString("ru-RU", sameYear ? { day: "numeric", month: "short" } : { day: "numeric", month: "short", year: "numeric" });
+		}
+
 		function fullTime(iso) {
 			var t = Date.parse(iso || "");
 			if (!Number.isFinite(t)) return "";
@@ -484,9 +513,48 @@ window.__ModuleLoader__.load({
 			return h("span", { className: "tb-row-counts" }, parts);
 		}
 
+		/**
+		 * Heading of a list row: the ticket key and the title without it, shown as "[APP-240] Заголовок".
+		 * The key comes from the task id ("app-240-some-branch") or from a title that starts with one
+		 * ("APP-240: …", "[APP-240] …"); a key the title repeats is cut out. No key → the title alone.
+		 */
+		function rowHeading(task) {
+			var title = String(task.title || "").trim();
+			var key = "";
+			var fromId = /^([a-z][a-z0-9]*)-(\d+)(?:-|$)/i.exec(String(task.id || ""));
+			if (fromId) key = (fromId[1] + "-" + fromId[2]).toUpperCase();
+			for (var i = 0; i < 3; i++) {
+				var lead = /^(\[)?([a-z][a-z0-9]*-\d+)(\])?\s*([:·|–—])?\s*/i.exec(title);
+				if (!lead) break;
+				var found = lead[2].toUpperCase();
+				// Another ticket's key is part of the title. Without the id to confirm it, a key needs
+				// brackets or a separator, so that "UTF-8 support" stays a plain title.
+				if (key ? found !== key : !(lead[1] && lead[3]) && !lead[4]) break;
+				key = found;
+				title = title.slice(lead[0].length);
+			}
+			if (!key && !title) title = String(task.id || "");
+			return { key: key, title: title };
+		}
+
+		/** "12 дней · изменена 16 нояб." under the title. The archive shows only the date: age stops mattering there. */
+		function RowDates(props) {
+			var task = props.task;
+			var age = task.archived ? "" : ageText(task.createdAt);
+			var changed = dayStamp(task.updatedAt);
+			if (!age && !changed) return null;
+			return h(
+				"span",
+				{ className: "tb-row-dates" },
+				age ? h("span", { key: "a", title: "Создана " + fullTime(task.createdAt) }, age) : null,
+				age && changed ? " · " : null,
+				changed ? h("span", { key: "c", title: "Последнее изменение карточки: " + fullTime(task.updatedAt) }, "изменена " + changed) : null,
+			);
+		}
+
 		function TaskRow(props) {
 			var task = props.task;
-			var pr = task.pr ? prNumber(task.pr) : "";
+			var heading = rowHeading(task);
 			var cover = task.cover ? mediaUrl(task.id, task.cover, task.archived, task.coverVersion || task.updatedAt) : null;
 			return h(
 				"div",
@@ -510,14 +578,15 @@ window.__ModuleLoader__.load({
 						{ className: "tb-row-body" },
 						h(
 							"span",
-							{ className: "tb-row-key" },
-							h("span", { className: "tb-row-id" }, task.id),
-							pr ? h("span", { className: "tb-row-pr" }, " · PR " + pr) : null,
+							{ className: "tb-row-title" },
+							heading.key ? h("span", { className: "tb-row-ticket" }, "[" + heading.key + "]") : null,
+							heading.key && heading.title ? " " : null,
+							heading.title,
 						),
-						h("span", { className: "tb-row-title" }, task.title),
 						task.status === "changes_requested" && task.review && task.review.comment
 							? h("span", { className: "tb-row-comment" }, "«" + task.review.comment + "»")
 							: null,
+						h(RowDates, { task: task }),
 						h("span", { className: "tb-row-foot" }, h(TaskChips, { task: task }), h(RowCounts, { task: task })),
 					),
 				),
@@ -1424,6 +1493,7 @@ window.__ModuleLoader__.load({
 			".tb-row-thumb img{display:block;width:100%;height:100%;object-fit:cover;object-position:top left}",
 			".tb-row-thumb-empty{border-style:dashed;border-color:var(--tb-line2)}",
 			".tb-row-body{min-width:0;flex:1;display:flex;flex-direction:column;gap:4px}",
+			".tb-row-dates{font-size:12px;line-height:16px;color:var(--tb-fg3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}",
 			".tb-row-foot{display:flex;align-items:flex-end;gap:8px;min-width:0}",
 			".tb-row-foot .tb-chips{flex:1;min-width:0}",
 			".tb-row-counts{margin-left:auto;flex:none;display:inline-flex;gap:8px;align-items:center;font-size:12px;color:var(--tb-fg2);white-space:nowrap;padding-bottom:1px}",
@@ -1432,9 +1502,9 @@ window.__ModuleLoader__.load({
 			".tb-row:hover{background:var(--tb-hover)}",
 			".tb-row-selected,.tb-row-selected:hover{background:var(--tb-card)}",
 			".tb-row-selected::before{background:var(--tb-accent)}",
-			".tb-row-key{font-family:var(--tb-mono);font-size:13px;color:var(--tb-fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}",
-			".tb-row-selected .tb-row-key{color:var(--tb-accent)}",
-			".tb-row-title{color:var(--tb-fg2);font-size:14px;line-height:20px;word-break:break-word}",
+			".tb-row-title{color:var(--tb-fg);font-size:14px;line-height:20px;word-break:break-word}",
+			".tb-row-ticket{color:var(--tb-fg2);font-variant-numeric:tabular-nums;white-space:nowrap}",
+			".tb-row-selected .tb-row-ticket{color:var(--tb-accent)}",
 			".tb-row-comment{font-size:12px;color:var(--tb-warn);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}",
 			// chips
 			".tb-chips{display:flex;flex-wrap:wrap;gap:6px;margin-top:4px}",
@@ -1582,6 +1652,11 @@ window.__ModuleLoader__.load({
 			safeUrl: safeUrl,
 			plural: plural,
 			relTime: relTime,
+			ageDays: ageDays,
+			ageText: ageText,
+			dayStamp: dayStamp,
+			RowDates: RowDates,
+			rowHeading: rowHeading,
 			mediaUrl: mediaUrl,
 			formatBytes: formatBytes,
 			MainPanel: MainPanel,
